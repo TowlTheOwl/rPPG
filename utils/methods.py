@@ -120,7 +120,7 @@ def CHROM_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
         2. Project normalized RGB onto chrominance signals:
             X_s = 3 R_n - 2 G_n
             Y_s = 1.5 R_n + G_n - 1.5 B_n
-        3. Bandpass filter X_s and Y_s.
+        3. Bandpass filter X_s and Y_s to obtain X_f and Y_f.
         4. Compute scaling factor:
             alpha = std(X_f) / std(Y_f)
         5. Form the pulse signal:
@@ -164,6 +164,8 @@ def CHROM_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
         plt.title("CHROM: 1D signal")
         plt.show()
 
+    S = scipy.signal.detrend(S)
+    S = bandpass_filter(S, fps)  # re-filter after detrend
     return S
 
 def POS_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
@@ -178,13 +180,12 @@ def POS_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
         2. Project normalized RGB onto orthogonal chrominance signals:
             X_s = G_n - B_n
             Y_s = -2 R_n + G_n + B_n
-        3. Bandpass filter X_s and Y_s.
-        4. Compute scaling factor:
+        3. Compute scaling factor:
             alpha = std(X_f) / std(Y_f)
-        5. Form the pulse signal:
+        4. Form the pulse signal:
             S = X_f + alpha * Y_f
-        6. Detrend and bandpass filter the result.
-        7. Return the final rPPG signal.
+        5. Detrend and bandpass filter the result.
+        6. Return the final rPPG signal.
 
     Inputs:
         color_signal (np.ndarray):
@@ -207,7 +208,8 @@ def POS_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
         plt.plot(XY_s[1])
         plt.title("POS: X and Y")
         plt.show()
-    XY_f = bandpass_filter(XY_s, fps)
+    # XY_f = bandpass_filter(XY_s, fps)
+    XY_f = XY_s
     stdev = np.std(XY_f, axis=1)
     alpha = stdev[0]/stdev[1]
     S = XY_f[0] + alpha * XY_f[1]
@@ -287,8 +289,11 @@ def CHROM_method_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6
         S[i:i+window_len] += Sw * taper_window
         W[i:i+window_len] += taper_window
 
+    
     W = np.where(W == 0, 1e-6, W)
     S /= W
+    valid_end = (((N - window_len) // step) * step) + window_len
+    S = S[:valid_end]
     S = scipy.signal.detrend(S)
     S = bandpass_filter(S, fps)
     if show_graph:
@@ -298,7 +303,7 @@ def CHROM_method_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6
 
     return S
 
-def POS_method_windowed(color_signal:np.ndarray, fps:int, show_graph:bool=False):
+def POS_method_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6, show_graph:bool=False):
     """
     Computes heart rate using the windowed POS (Plane-Orthogonal-to-Skin) method.
 
@@ -307,7 +312,7 @@ def POS_method_windowed(color_signal:np.ndarray, fps:int, show_graph:bool=False)
 
     Steps:
         1. Define window length as 1.6 seconds (converted to samples)
-           and use 50% overlap between windows.
+           and use 1 frame step size.
         2. For each temporal window:
             a. Extract windowed RGB signals.
             b. Normalize each channel by dividing by its temporal mean.
@@ -342,9 +347,11 @@ def POS_method_windowed(color_signal:np.ndarray, fps:int, show_graph:bool=False)
             1D POS-based rPPG signal.
     """
     N = color_signal.shape[1]
-    window_len = math.ceil(1.6 * fps)
-    step = window_len // 2
+    window_len = math.ceil(window_len * fps)
+    # step = window_len // 2
+    step = 1
     S = np.zeros(N)
+    W = np.zeros(N)
 
     chrom_matrix = np.array([[0, 1, -1],[-2, 1, 1]]) # (2, 3)
     
@@ -358,7 +365,10 @@ def POS_method_windowed(color_signal:np.ndarray, fps:int, show_graph:bool=False)
         Sw = XY[0] + alpha * XY[1]
         Sw -= np.mean(Sw)
         S[i:i+window_len] += Sw
+        W[i:i+window_len] += 1
     
+    W = np.where(W == 0, 1e-6, W)
+    S /= W
     S = scipy.signal.detrend(S)
     S = bandpass_filter(S, fps)
     if show_graph:

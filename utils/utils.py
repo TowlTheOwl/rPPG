@@ -2,36 +2,6 @@ import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
 
-class RGBData:
-    def __init__(self):
-        self.data = {
-            "left": [],
-            "right": [],
-            "forehead": []
-        }
-
-    def get_data(self):
-        if not len(self.data["left"]) == len(self.data["right"]) == len(self.data["forehead"]):
-            raise RuntimeError("Length mismatch")
-        return self.data
-
-
-def get_rgb_average(frame, x, y, width, height):
-    r_total = 0
-    g_total = 0
-    b_total = 0 
-    for i in range(x, x + width):
-        for j in range(y, y + height):
-            # img[y, x] -> [B, G, R]
-            b, g, r = frame[j, i]
-            r_total += r.astype(np.uint32)
-            g_total += g.astype(np.uint32)
-            b_total += b.astype(np.uint32)
-
-    num_pixels = width * height
-    rgb_avg = (r_total/num_pixels, g_total/num_pixels, b_total/num_pixels)
-    return rgb_avg
-
 def interactive_graph(results:dict, title:str):
     """
     Plots an interactive graph.

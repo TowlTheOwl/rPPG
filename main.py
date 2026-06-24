@@ -12,6 +12,11 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import CheckButtons
 import scipy.signal
 import math
+import mediapipe as mp
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
+from mediapipe.tasks.python.vision import FaceLandmarkerOptions, FaceLandmarker, RunningMode
+
 
 def record_video(camera_fps: int, recording_duration: int, output_dir: str):
     """
@@ -67,103 +72,118 @@ def record_video(camera_fps: int, recording_duration: int, output_dir: str):
     out.release()
     cv2.destroyAllWindows()
 
-def analyze_video(video_source:str, video_fps:int, video_duration:int, show_frame:bool=False):
+def analyze_video(video_source: str, show_frame: bool = False):
     """
-    Reads a video file and returns a dict object containing average rgb value for each frame
+    Reads a video file and returns a dict object containing average rgb value for each frame.
+    Uses MediaPipe Tasks API (mediapipe >= 0.10) for face landmark detection.
 
-    Output dict: maps region_name -> list[tuple (r, g, b), ...]
+    Requires: face_landmarker.task model file in working directory.
+    Download: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+
+    Output: tuple(
+            video data (tuple): tuple of (total frames, fps)
+            undetected frames (np.ndarray): array of length (video length), marked 1 if ROI's undetected for that frame,
+            data (np.ndarray): (3, 3, video length) matrix, data = [left cheek, right cheek, forehead], with
+                each being a (3, video length) matrix of (R, G, B) data
+        )
     """
+
+    def get_rgb_average(frame, x, y, width, height):
+        h_frame, w_frame = frame.shape[:2]
+        x, y = max(0, x), max(0, y)
+        x2, y2 = min(w_frame, x + width), min(h_frame, y + height)
+        roi = frame[y:y2, x:x2]
+        if roi.size == 0:
+            return np.array([0.0, 0.0, 0.0])
+        return np.mean(roi, axis=(0, 1))[::-1]  # BGR -> RGB
+
     cap = cv2.VideoCapture(video_source)
-
-    detector = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
-
-    total_frames = video_duration * video_fps
-
-    undetected_frame = False
-    data = RGBData()
-
     if not cap.isOpened():
         raise RuntimeError("Video cannot be opened")
+
+    # --- MediaPipe Tasks API setup ---
+    base_options = mp_python.BaseOptions(model_asset_path="face_landmarker.task")
+    options = mp_vision.FaceLandmarkerOptions(
+        base_options=base_options,
+        running_mode=mp_vision.RunningMode.VIDEO,   # VIDEO mode enables inter-frame tracking
+        num_faces=1,
+        min_face_detection_confidence=0.5,
+        min_face_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    face_landmarker = mp_vision.FaceLandmarker.create_from_options(options)
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+
+    undetected_frames = np.zeros(total_frames)
+    data = np.zeros((3, 3, total_frames))
+
     for i in tqdm(range(total_frames)):
         ret, frame = cap.read()
         if not ret:
             print("DID NOT RETURN FRAME: analyze_video")
             break
-        
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        faces = detector(gray, 1)
+        h, w = frame.shape[:2]
 
-        if not len(faces) > 0:
-            undetected_frame = True
-            break # there is a frame where a face cannot be detected.
-        else:
-            face = faces[0]
-            landmarks = predictor(gray, face)
+        # VIDEO mode requires a monotonically increasing timestamp in milliseconds
+        timestamp_ms = int(cap.get(cv2.CAP_PROP_POS_MSEC))
 
-            face_left = face.left()
-            face_top = face.top()
-            face_right = face.right()
-            face_bottom = face.bottom()
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        result = face_landmarker.detect_for_video(mp_image, timestamp_ms)
 
-            # extract forehead and cheeks
-            # left cheek (third between points x: (2, 48), y: (41, 48))
-            width = int((landmarks.part(48).x - landmarks.part(2).x)/3)
-            height = int((landmarks.part(48).y - landmarks.part(41).y)/3)
-            x = landmarks.part(2).x + width
-            y = landmarks.part(41).y + height
+        if not result.face_landmarks:
+            undetected_frames[i] = 1
+            continue
 
-            rgb_avg = get_rgb_average(frame, x, y, width, height)
-            data.data["left"].append(rgb_avg)
+        lm = result.face_landmarks[0]  # normalised landmarks, x/y in [0, 1]
 
-            if show_frame: cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 2)
+        def px(idx):
+            """Convert normalised landmark to pixel coordinates."""
+            return int(lm[idx].x * w), int(lm[idx].y * h)
 
-            # right cheek (third between x: (54, 14), y: (46, 54))
-            width = int((landmarks.part(14).x - landmarks.part(54).x)/3)
-            height = int((landmarks.part(54).y - landmarks.part(46).y)/3)
-            x = landmarks.part(54).x + width
-            y = landmarks.part(46).y + height
+        # Left cheek (dlib 2→MP 234, dlib 41→MP 110, dlib 48→MP 61)
+        x = px(423)[0]  # inner edge (near nose)
+        y = px(347)[1]  # top edge (under eye)
+        width = px(411)[0] - px(423)[0] # inner to outer
+        height = px(426)[1] - px(347)[1]    # top to bottom
+        data[0, :, i] = get_rgb_average(frame, x, y, width, height)
+        if show_frame:
+            cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 2)
 
-            rgb_avg = get_rgb_average(frame, x, y, width, height)
-            data.data["right"].append(rgb_avg)
+        # Right cheek (dlib 54→MP 291, dlib 46→MP 340, dlib 14→MP 454)
+        x = px(187)[0] # outer edge (near ear)
+        y = px(118)[1] # top edge (under eye)
+        width = px(203)[0] - px(187)[0] # outer to inner
+        height = px(206)[1] - px(118)[1] # top to bottom
+        data[1, :, i] = get_rgb_average(frame, x, y, width, height)
+        if show_frame:
+            cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 2)
 
-            if show_frame: cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 2)
-
-            # forehead (x: (21, 22), third between y: (22, 27))
-            width = int((landmarks.part(22).x - landmarks.part(21).x))
-            height = int((landmarks.part(27).y - landmarks.part(22).y))
-            x = landmarks.part(21).x
-            y = landmarks.part(22).y - int(1.5 * height)
-
-            rgb_avg = get_rgb_average(frame, x, y, width, height)
-            data.data["forehead"].append(rgb_avg)
-
-            if show_frame: cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 2)
-
-
-            # cv2.rectangle(frame, (face_left, face_top), (face_right, face_bottom), (0, 255, 0), 2)
+        # Forehead (x: (104, 333), y:(10, 151))
+        width  = px(299)[0] - px(69)[0]
+        height = px(151)[1] - px(10)[1]
+        x = px(69)[0]
+        y = px(10)[1]
+        data[2, :, i] = get_rgb_average(frame, x, y, width, height)
+        if show_frame:
+            cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 2)
 
         if show_frame:
             cv2.imshow("Video", frame)
-        k = cv2.waitKey(1) & 0xFF 
-        if k != -1:
+            k = cv2.waitKey(1) & 0xFF
             if k == ord('q'):
-                print("Exiting")
-                break
+                raise KeyboardInterrupt("Exited")
 
     cap.release()
+    face_landmarker.close()     # release MediaPipe resources
     cv2.destroyAllWindows()
 
-    roi_values = data.get_data()
-    roi_signals = np.array([
-        roi_values["left"],
-        roi_values["right"],
-        roi_values["forehead"]
-    ])  # (3, N, 3)
-    return (not undetected_frame), roi_signals
+    return (total_frames, fps), undetected_frames, data
 
-def evaluate(signal_3d:np.ndarray, fps:int, results:dict, method_name:str, post_process_method:str, **kwargs):
+def evaluate(signal:np.ndarray, fps:int, results:dict, method_name:str, post_process_method:str, **kwargs):
     """
     Evaluates the 3d color signal using the chosen method, stores data in results
 
@@ -173,7 +193,7 @@ def evaluate(signal_3d:np.ndarray, fps:int, results:dict, method_name:str, post_
     The data is stored in results as a 2d dictionary: post_process_method -> method_name -> data
 
     Inputs:
-        signal_3d (np.ndarray): (3, N) array containing data
+        signal (np.ndarray): (3, 3, N) array containing data (ROI, color, frame length)
         fps (int): fps of the recording
         results (dict): dictionary to store the data
         method_name (str): name of the rPPG method to use
@@ -181,21 +201,26 @@ def evaluate(signal_3d:np.ndarray, fps:int, results:dict, method_name:str, post_
     """
     BVP = None
     show_graph = kwargs["show_graph"] if "show_graph" in kwargs else False
+    average_signal = signal.mean(axis=0) # take average across ROI's: (3, N)
     match method_name:
         case "GREEN":
-            BVP = green_only(signal_3d[1], fps)
+            BVP = green_only(average_signal[1], fps, show_graph=show_graph)
         case "Green/Red":
-            BVP = ratio_method(signal_3d, 0, fps, show_graph)
+            BVP = ratio_method(average_signal, 0, fps, show_graph=show_graph)
         case "Green/Blue":
-            BVP = ratio_method(signal_3d, 2, fps, show_graph)
+            BVP = ratio_method(average_signal, 2, fps, show_graph=show_graph)
         case "CHROM":
-            BVP = CHROM_method(signal_3d, fps, show_graph)
+            BVP = CHROM_method(average_signal, fps, show_graph=show_graph)
         case "CHROM Windowed":
-            BVP = CHROM_method_windowed(signal_3d, fps, show_graph)
+            BVP = CHROM_method_windowed(average_signal, fps, show_graph=show_graph)
         case "POS":
-            BVP = POS_method(signal_3d, fps, show_graph)
+            BVP = POS_method(average_signal, fps, show_graph=show_graph)
         case "POS Windowed":
-            BVP = POS_method_windowed(signal_3d, fps, show_graph)
+            BVP = POS_method_windowed(average_signal, fps, show_graph=show_graph)
+            # bvps = [POS_method_windowed(signal[roi], fps) for roi in range(3)]
+            # bvps = [b / (np.std(b) + 1e-8) for b in bvps]
+            # BVP = np.mean(bvps, axis=0)
+            # BVP = bandpass_filter(scipy.signal.detrend(BVP), fps)
         case _:
             raise ValueError(f"Method name {method_name} not recognized")
     
@@ -223,7 +248,7 @@ def evaluate(signal_3d:np.ndarray, fps:int, results:dict, method_name:str, post_
 if __name__ == "__main__":
     # set some variables
     camera_fps = 30     # needs to be manually checked
-    recording_duration = 10
+    recording_duration = 30
     video_dir = "output.mp4"
     data_dir = "data.pkl"
     data = None
@@ -242,21 +267,38 @@ if __name__ == "__main__":
 
     # Analyze and save data
     if (start_point <= 1):
-        ret, data = analyze_video(video_dir, 30, recording_duration, False)
-        if not ret:
+        video_data, undetected_frames, data = analyze_video(video_dir, show_frame=True)
+        print(f"# of undetected frames: {np.sum(undetected_frames)}")
+        # if more than 5% of video has undetected frames, don't save video
+        if np.sum(undetected_frames) >= int(video_data[0] * 0.05):
             print("There was an error while processing video.")
         else:
+            # Substitute missing frames via linear interpolation across each channel
+            frame_indices = np.arange(video_data[0])
+            detected_mask = undetected_frames == 0
+
+            if np.any(~detected_mask):  # only run if there are gaps to fill
+                for roi in range(data.shape[0]):       # left cheek, right cheek, forehead
+                    for channel in range(data.shape[1]):  # R, G, B
+                        signal = data[roi, channel, :]
+                        # interpolate at undetected positions using detected frames
+                        signal[~detected_mask] = np.interp(
+                            frame_indices[~detected_mask],  # x positions to fill
+                            frame_indices[detected_mask],   # known x positions
+                            signal[detected_mask]           # known values
+                        )
+                        data[roi, channel, :] = signal
             with open(data_dir, 'wb') as file:
-                pickle.dump(data, file)
+                pickle.dump((video_data, data), file)
     
     # open data and display
     if (start_point <= 2):
         if data is None:
             with open(data_dir, 'rb') as file:
-                data:np.ndarray = pickle.load(file)
+                (video_data, data) = pickle.load(file)
 
-        roi_signals = data.mean(axis=0)  # (N, 3)
-        color_values = roi_signals.T # now we have (3, N) matrix of color values
+        camera_fps = video_data[1]
+        print(f"{camera_fps=}")
 
         results = {}
         show_graph = False
@@ -265,7 +307,7 @@ if __name__ == "__main__":
         
         for method_name in method_names:
             for post_processing_method in post_processing_methods:
-                evaluate(color_values, camera_fps, results, method_name, post_processing_method)
+                evaluate(data, camera_fps, results, method_name, post_processing_method)
 
         for ppm in results:
             interactive_graph(results[ppm], f"Results: {ppm}")
