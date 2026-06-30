@@ -181,6 +181,22 @@ def analyze_video(video_source: str, show_frame: bool = False):
     face_landmarker.close()     # release MediaPipe resources
     cv2.destroyAllWindows()
 
+    # Substitute missing frames via linear interpolation across each channel
+    frame_indices = np.arange(total_frames)
+    detected_mask = undetected_frames == 0
+
+    if np.any(~detected_mask):  # only run if there are gaps to fill
+        for roi in range(data.shape[0]):       # left cheek, right cheek, forehead
+            for channel in range(data.shape[1]):  # R, G, B
+                signal = data[roi, channel, :]
+                # interpolate at undetected positions using detected frames
+                signal[~detected_mask] = np.interp(
+                    frame_indices[~detected_mask],  # x positions to fill
+                    frame_indices[detected_mask],   # known x positions
+                    signal[detected_mask]           # known values
+                )
+                data[roi, channel, :] = signal
+
     return (total_frames, fps), undetected_frames, data
 
 def evaluate(signal:np.ndarray, fps:int, results:dict, method_name:str, post_process_method:str, **kwargs):
@@ -202,6 +218,7 @@ def evaluate(signal:np.ndarray, fps:int, results:dict, method_name:str, post_pro
     BVP = None
     show_graph = kwargs["show_graph"] if "show_graph" in kwargs else False
     average_signal = signal.mean(axis=0) # take average across ROI's: (3, N)
+    # average_signal = signal[2] # forehead only
     match method_name:
         case "GREEN":
             BVP = green_only(average_signal[1], fps, show_graph=show_graph)
@@ -248,8 +265,8 @@ def evaluate(signal:np.ndarray, fps:int, results:dict, method_name:str, post_pro
 if __name__ == "__main__":
     # set some variables
     camera_fps = 30     # needs to be manually checked
-    recording_duration = 30
-    video_dir = "output.mp4"
+    recording_duration = 15
+    video_dir = "vid.avi"
     data_dir = "data.pkl"
     data = None
 
@@ -259,7 +276,7 @@ if __name__ == "__main__":
     1: analyze a recorded video using video_dir
     2: calculate
     """
-    start_point = 2
+    start_point = 0
 
     # Record video
     if (start_point <= 0):
@@ -273,21 +290,6 @@ if __name__ == "__main__":
         if np.sum(undetected_frames) >= int(video_data[0] * 0.05):
             print("There was an error while processing video.")
         else:
-            # Substitute missing frames via linear interpolation across each channel
-            frame_indices = np.arange(video_data[0])
-            detected_mask = undetected_frames == 0
-
-            if np.any(~detected_mask):  # only run if there are gaps to fill
-                for roi in range(data.shape[0]):       # left cheek, right cheek, forehead
-                    for channel in range(data.shape[1]):  # R, G, B
-                        signal = data[roi, channel, :]
-                        # interpolate at undetected positions using detected frames
-                        signal[~detected_mask] = np.interp(
-                            frame_indices[~detected_mask],  # x positions to fill
-                            frame_indices[detected_mask],   # known x positions
-                            signal[detected_mask]           # known values
-                        )
-                        data[roi, channel, :] = signal
             with open(data_dir, 'wb') as file:
                 pickle.dump((video_data, data), file)
     

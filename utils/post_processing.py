@@ -8,7 +8,7 @@ def _next_power_of_2(x):
     """Calculate the nearest power of 2."""
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
 
-def rFFT(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=True):
+def rFFT(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=False):
     """
     Extracts heart rate from a given 1d signal using rFFT
 
@@ -21,7 +21,8 @@ def rFFT(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=True):
         signal: 1d signal that has been bandpassed, normalized, and detrended
     """
 
-    N = _next_power_of_2(len(signal))
+    # N = _next_power_of_2(len(signal))
+    N = 4 * len(signal)
     windowed_signal = signal * np.hanning(len(signal))
 
     if show_graph:
@@ -49,11 +50,12 @@ def rFFT(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=True):
 
     return round(bpm, 2), (heart_rate_freqs, heart_rate_mags)
 
-def periodogram(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=True):
+def periodogram(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=False):
     """
     Does almost the same thing as the rFFT method, but uses SciPy's periodogram method.
     """
     N = _next_power_of_2(len(signal))
+    N = 4 * len(signal)
     freqs, psd = scipy.signal.periodogram(signal, fs=fps, nfft=N, detrend=False, window='hann')
 
     mask = (freqs >= min_hz) & (freqs <= max_hz)
@@ -73,11 +75,14 @@ def periodogram(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=Tru
 
     return round(bpm, 2), (masked_freqs, masked_psd)
 
-def peak_detection(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=True):
+def peak_detection(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=False):
     """
     Uses SciPy's find_peaks method to manually locate peaks, use the average distance between peaks
     to calculate the heart rate.
     """
+    signal = signal - np.mean(signal)
+    if np.std(signal) != 0:
+        signal = signal / np.std(signal)
     signal = bandpass_filter(signal, fps, min_hz, max_hz)
     initial_peaks, _ = scipy.signal.find_peaks(signal)
     peak_heights = signal[initial_peaks]

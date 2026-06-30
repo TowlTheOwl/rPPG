@@ -125,7 +125,8 @@ def CHROM_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
             alpha = std(X_f) / std(Y_f)
         5. Form the pulse signal:
             S = X_f - alpha * Y_f
-        6. Return the resulting rPPG signal.
+        6. Detrend & Bandpass the final signal
+        7. Return the resulting rPPG signal.
 
     Inputs:
         color_signal (np.ndarray):
