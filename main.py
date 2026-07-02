@@ -1,5 +1,4 @@
 import cv2
-import dlib
 import time
 import datetime
 from tqdm import tqdm
@@ -119,7 +118,7 @@ def analyze_video(video_source: str, show_frame: bool = False):
     undetected_frames = np.zeros(total_frames)
     data = np.zeros((3, 3, total_frames))
 
-    for i in tqdm(range(total_frames)):
+    for i in tqdm(range(total_frames), leave=False, desc="Analyzing video"):
         ret, frame = cap.read()
         if not ret:
             print("DID NOT RETURN FRAME: analyze_video")
