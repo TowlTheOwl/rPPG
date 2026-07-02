@@ -11,7 +11,7 @@ def bandpass_filter(signal, fps, low=0.7, high=2.5):
     b, a = scipy.signal.butter(3, [low/nyquist, high/nyquist], btype='bandpass')
     return scipy.signal.filtfilt(b, a, signal, axis=-1)
 
-def green_only(raw_green_signal:np.ndarray, fps:int, show_graph:bool=False):
+def green_only(color_signal:np.ndarray, fps:int, show_graph:bool=False):
     """
     Computes an rPPG signal using the Green-only method.
 
@@ -37,6 +37,7 @@ def green_only(raw_green_signal:np.ndarray, fps:int, show_graph:bool=False):
         np.ndarray:
             Bandpass-filtered green-channel rPPG signal.
     """
+    raw_green_signal = color_signal[1]
     
     G_d = scipy.signal.detrend(raw_green_signal) + np.mean(raw_green_signal)
     G_n = (G_d / np.mean(G_d)) - 1
@@ -375,6 +376,62 @@ def POS_method_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6, 
     if show_graph:
         plt.plot(S)
         plt.title("POS Windowed: 1D signal")
+        plt.show()
+
+    return S
+
+def green_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6, show_graph:bool=False):
+    N = color_signal.shape[1]
+    window_len = math.ceil(window_len * fps)
+    step = window_len // 2
+    S = np.zeros(N)
+    W = np.zeros(N)
+    taper_window = np.hanning(window_len) 
+    
+    for i in range(0, N - window_len + 1, step):
+        Cw = color_signal[:, i:i+window_len]
+        Sw = green_only(Cw, fps)
+
+        S[i:i+window_len] += Sw * taper_window
+        W[i:i+window_len] += taper_window
+    
+    W = np.where(W == 0, 1e-6, W)
+    S /= W
+    valid_end = (((N - window_len) // step) * step) + window_len
+    S = S[:valid_end]
+    S = scipy.signal.detrend(S)
+    S = bandpass_filter(S, fps)
+    if show_graph:
+        plt.plot(S)
+        plt.title("Windowed: 1D signal")
+        plt.show()
+
+    return S
+
+def ratio_windowed(color_signal:np.ndarray, secondary:int, fps:int, window_len:float=1.6, show_graph:bool=False):
+    N = color_signal.shape[1]
+    window_len = math.ceil(window_len * fps)
+    step = window_len // 2
+    S = np.zeros(N)
+    W = np.zeros(N)
+    taper_window = np.hanning(window_len) 
+    
+    for i in range(0, N - window_len + 1, step):
+        Cw = color_signal[:, i:i+window_len]
+        Sw = ratio_method(Cw, secondary, fps)
+
+        S[i:i+window_len] += Sw * taper_window
+        W[i:i+window_len] += taper_window
+    
+    W = np.where(W == 0, 1e-6, W)
+    S /= W
+    valid_end = (((N - window_len) // step) * step) + window_len
+    S = S[:valid_end]
+    S = scipy.signal.detrend(S)
+    S = bandpass_filter(S, fps)
+    if show_graph:
+        plt.plot(S)
+        plt.title("Windowed: 1D signal")
         plt.show()
 
     return S

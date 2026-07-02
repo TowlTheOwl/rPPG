@@ -22,9 +22,12 @@ def generate_results(vid_folder, save_folder=None):
     average_signal = data.mean(axis=0) # take average across ROI's: (3, N)
     # get BVPs that are num_frames long.
     BVPs = [
-        green_only(average_signal[1], fps, show_graph=False),
+        green_only(average_signal, fps, show_graph=False),
+        green_windowed(average_signal, fps, show_graph=False),
         ratio_method(average_signal, 0, fps, show_graph=False),
+        ratio_windowed(average_signal, 0, fps, show_graph=False),
         ratio_method(average_signal, 2, fps, show_graph=False),
+        ratio_windowed(average_signal, 2, fps, show_graph=False),
         CHROM_method(average_signal, fps, show_graph=False),
         CHROM_method_windowed(average_signal, fps, show_graph=False),
         POS_method(average_signal, fps, show_graph=False),

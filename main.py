@@ -220,7 +220,7 @@ def evaluate(signal:np.ndarray, fps:int, results:dict, method_name:str, post_pro
     # average_signal = signal[2] # forehead only
     match method_name:
         case "GREEN":
-            BVP = green_only(average_signal[1], fps, show_graph=show_graph)
+            BVP = green_only(average_signal, fps, show_graph=show_graph)
         case "Green/Red":
             BVP = ratio_method(average_signal, 0, fps, show_graph=show_graph)
         case "Green/Blue":
