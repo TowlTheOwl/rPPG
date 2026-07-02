@@ -8,10 +8,16 @@ import pathlib
 
 def generate_results(vid_folder, save_folder=None):
     folder_name = pathlib.Path(vid_folder).name
+    if not folder_name.startswith("subject"):
+        raise ValueError(f"Folder name {folder_name} does not start with 'subject'.")
     subject_num = int(folder_name[7:])
     gt_dir = os.path.join(vid_folder, 'ground_truth.txt')
+    if not os.path.exists(gt_dir):
+        raise FileNotFoundError(f"Ground truth file not found in {gt_dir}.")
     video_dir = os.path.join(vid_folder, 'vid.avi')
-    (num_frames, fps), _, data = analyze_video(video_dir, True)
+    if not os.path.exists(video_dir):
+        raise FileNotFoundError(f"Video file not found in {video_dir}.")
+    (num_frames, fps), _, data = analyze_video(video_dir, False)
 
     average_signal = data.mean(axis=0) # take average across ROI's: (3, N)
     # get BVPs that are num_frames long.
@@ -93,8 +99,57 @@ def generate_results(vid_folder, save_folder=None):
 if __name__ == "__main__":
     # results = generate_results("subject1")
     # np.savetxt("output.csv", results, delimiter=",", fmt="%.2f")
-    data = np.loadtxt('output.csv', delimiter=',')
-    error = data[:, 3]-data[:, -2]
-    print(np.std(error, ddof=1))
-    plt.hist(error)
-    plt.show()
+    # data = np.loadtxt('output.csv', delimiter=',')
+    # error = data[:, 3]-data[:, -2]
+    # print(np.std(error, ddof=1))
+    # plt.hist(error)
+    # plt.show()
+
+    # loop through folder in the dataset diretory and generate results for each subject, saving to results folder
+    dataset_dir = "E:\Downloads\datasetzip\DATASET_2"
+    results_dir = pathlib.Path("results")
+    for subject_folder in tqdm(os.listdir(dataset_dir), desc="Processing subjects"):
+        subject_path = os.path.join(dataset_dir, subject_folder)
+        print(f"Processing {subject_folder}...")
+        if os.path.isdir(subject_path):
+            if os.path.exists(results_dir / f"{subject_folder}.csv"):
+                print(f"Results for {subject_folder} already exist. Skipping...")
+                continue
+            results = generate_results(subject_path, results_dir)
+    
+    print("Done generating results for all subjects.")
+
+    methods = [
+        "GREEN",
+        "Green/Red",
+        "Green/Blue",
+        "CHROM",
+        "CHROM_windowed",
+        "POS",
+        "POS_windowed"
+    ]
+
+    post_processings = [
+        "rFFT",
+        "Periodogram",
+        "Peak Detection"
+    ]
+
+    concatenated_data = np.array([]).reshape(0, 4+len(methods)*len(post_processings))
+
+    # Loop through only .txt files in the main folder
+    for file_path in results_dir.glob("subject*.csv"):
+        # Load the data from the CSV file
+        data = np.loadtxt(file_path, delimiter=',')
+        
+        # Check if the data has at least 3 columns
+        if data.shape[1] < 3:
+            print(f"File {file_path} does not have enough columns. Skipping...")
+            continue
+        
+        # Concatenate the data
+        concatenated_data = np.vstack((concatenated_data, data))
+        
+    # Save the concatenated data to a new CSV file
+    output_file = results_dir / "concatenated_results.csv"
+    np.savetxt(output_file, concatenated_data, delimiter=',', fmt="%.2f")
