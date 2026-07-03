@@ -124,8 +124,11 @@ if __name__ == "__main__":
 
     methods = [
         "GREEN",
+        "GREEN_windowed",
         "Green/Red",
+        "Green/Red_windowed",
         "Green/Blue",
+        "Green/Blue_windowed",
         "CHROM",
         "CHROM_windowed",
         "POS",
