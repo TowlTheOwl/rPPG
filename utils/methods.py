@@ -15,7 +15,9 @@ def green_only(color_signal:np.ndarray, fps:int, show_graph:bool=False):
     """
     Computes an rPPG signal using the Green-only method.
 
-    This method exploits the fact that the green channel exhibits the
+    Remote plethysmographic imaging using ambient light (GREEN), by Verkruysse et al., 2008
+
+    This method uses the fact that the green channel exhibits the
     strongest pulsatile component due to hemoglobin light absorption.
 
     Steps:
@@ -26,8 +28,8 @@ def green_only(color_signal:np.ndarray, fps:int, show_graph:bool=False):
         4. Return the filtered signal as the blood volume pulse (BVP).
 
     Inputs:
-        raw_green_signal (np.ndarray):
-            Raw green-channel intensity values over time (shape: N,).
+        color_signal (np.ndarray):
+            RGB color signals with shape (3, N).
         fps (int):
             Frames per second of the video.
         show_graph (bool):
@@ -113,6 +115,8 @@ def CHROM_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
     """
     Computes an rPPG signal using the CHROM (Chrominance-based) method.
 
+    Robust pulse rate from chrominance-based rppg (CHROM), by Haan et al., 2013
+
     The CHROM method projects normalized RGB signals onto chrominance
     subspaces designed to suppress motion-induced intensity variations.
 
@@ -173,6 +177,8 @@ def CHROM_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
 def POS_method(color_signal:np.ndarray, fps:int, show_graph:bool=False):
     """
     Computes an rPPG signal using the POS (Plane-Orthogonal-to-Skin) method.
+
+    Algorithmic principles of remote ppg (POS), by Wang et al., 2016
 
     POS suppresses motion artifacts by projecting color variations onto
     a plane orthogonal to the skin-tone direction.
@@ -252,11 +258,6 @@ def CHROM_method_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6
         5. Detrend and bandpass filter the reconstructed signal.
         6. Return the final 1D rPPG signal.
 
-    Notes:
-        - Windowing improves robustness to motion and illumination changes.
-        - 50% overlap ensures smooth temporal reconstruction.
-        - The Hanning window reduces boundary artifacts between windows.
-
     Inputs:
         color_signal (np.ndarray):
             RGB color signals with shape (3, N).
@@ -313,7 +314,7 @@ def POS_method_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6, 
     windows and reconstructs a continuous rPPG signal via overlap-add.
 
     Steps:
-        1. Define window length as 1.6 seconds (converted to samples)
+        1. Define window length as window_len seconds (converted to samples)
            and use 1 frame step size.
         2. For each temporal window:
             a. Extract windowed RGB signals.
@@ -381,6 +382,34 @@ def POS_method_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6, 
     return S
 
 def green_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6, show_graph:bool=False):
+    """
+    Computes an rPPG signal using the Green-only method with sliding windows.
+
+    Steps:
+        1. Define window length as window_len seconds, with 50% overlap between windows.
+        2. Then, for each window:
+            a. Detrend the raw green signal to remove slow illumination drift.
+            b. Restore the DC level and normalize by the mean to isolate
+            relative intensity changes.
+            c. Apply a bandpass filter to isolate heart-rate frequencies.
+        3. Apply a Hanning tapering window and accumulate windowed signals
+           using overlap-add reconstruction.
+        4. Normalize by the accumulated window weights.
+        5. Detrend and bandpass filter the reconstructed signal.
+        6. Return the filtered signal as the blood volume pulse (BVP).
+
+    Inputs:
+        color_signal (np.ndarray):
+            RGB color signals with shape (3, N).
+        fps (int):
+            Frames per second of the video.
+        show_graph (bool):
+            If True, intermediate and final signals are plotted.
+
+    Returns:
+        np.ndarray:
+            Bandpass-filtered green-channel rPPG signal.
+    """
     N = color_signal.shape[1]
     window_len = math.ceil(window_len * fps)
     step = window_len // 2
@@ -403,12 +432,52 @@ def green_windowed(color_signal:np.ndarray, fps:int, window_len:float=1.6, show_
     S = bandpass_filter(S, fps)
     if show_graph:
         plt.plot(S)
-        plt.title("Windowed: 1D signal")
+        plt.title("Windowed GREEN: 1D signal")
         plt.show()
 
     return S
 
 def ratio_windowed(color_signal:np.ndarray, secondary:int, fps:int, window_len:float=1.6, show_graph:bool=False):
+    """
+    Computes an rPPG signal using the color ratio method
+    (Green/Red or Green/Blue).
+
+    This method reduces motion and illumination artifacts by forming
+    a ratio between normalized color channels.
+
+    Steps:
+        1. Define window length as window_len seconds, with 50% overlap between windows.
+        2. Then, for each window:
+            a. Normalize green and secondary color channels by their means.
+            b. Compute the ratio signal:
+                ratio = (G / mean(G)) / (C / mean(C)) - 1
+            c. Detrend the ratio signal to remove low-frequency components.
+            d. Apply a bandpass filter to isolate heart-rate frequencies.
+        3. Apply a Hanning tapering window and accumulate windowed signals
+           using overlap-add reconstruction.
+        4. Normalize by the accumulated window weights.
+        5. Detrend and bandpass filter the reconstructed signal.
+        6. Return the filtered signal as the blood volume pulse (BVP).
+
+    Inputs:
+        color_signal (np.ndarray):
+            RGB color signals with shape (3, N).
+        secondary_color (int):
+            Index of secondary channel:
+                0 = red, 2 = blue.
+        fps (int):
+            Frames per second of the video.
+        show_graph (bool):
+            If True, the final rPPG signal is plotted.
+
+    Returns:
+        np.ndarray:
+            Bandpass-filtered ratio-based rPPG signal.
+
+    Raises:
+        ValueError:
+            If secondary_color is not 0 (red) or 2 (blue).
+    """
     N = color_signal.shape[1]
     window_len = math.ceil(window_len * fps)
     step = window_len // 2
@@ -431,7 +500,7 @@ def ratio_windowed(color_signal:np.ndarray, secondary:int, fps:int, window_len:f
     S = bandpass_filter(S, fps)
     if show_graph:
         plt.plot(S)
-        plt.title("Windowed: 1D signal")
+        plt.title("Windowed Ratio: 1D signal")
         plt.show()
 
     return S
