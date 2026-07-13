@@ -38,6 +38,7 @@ from scipy.stats import ttest_rel
 from statsmodels.stats.anova import AnovaRM
 from statsmodels.stats.multitest import multipletests
 from great_tables import GT
+import pingouin as pg
 
 from plots import *  # noqa: F401,F403 (project plotting helpers)
 
@@ -321,9 +322,27 @@ def build_long_dataframe(subject_mae, methods) -> pd.DataFrame:
     print(df)
     return df
 
+def run_repeated_measures_anova_pg(df: pd.DataFrame):
+    section("Repeated-measures ANOVA w PG (rppg x window x hr_method)")
+    anova = pg.rm_anova(
+        df, dv="error", subject="subject",
+        within=["rppg", "window"],
+    )
+    print(anova)
+    anova = pg.rm_anova(
+        df, dv="error", subject="subject",
+        within=["window", "hr_method"],
+    )
+    print(anova)
+    anova = pg.rm_anova(
+        df, dv="error", subject="subject",
+        within=["rppg", "hr_method"],
+    )
+    print(anova)
+    return anova
 
 def run_repeated_measures_anova(df: pd.DataFrame):
-    section("Repeated-measures ANOVA (rppg x window x hr_method)")
+    section("Repeated-measures ANOVA w SM (rppg x window x hr_method)")
     anova = AnovaRM(
         df, depvar="error", subject="subject",
         within=["rppg", "window", "hr_method"],
@@ -446,6 +465,66 @@ def plot_hr_method_effect(res: pd.DataFrame) -> None:
     )
     plt.tight_layout()
 
+# 8b. Follow-up: effect of rPPG method within each (window, HR-derivation method)
+ 
+def rppg_method_effect(df: pd.DataFrame) -> pd.DataFrame:
+    section("Effect of rPPG method within each (window, HR-derivation method)")
+ 
+    rows, pvals = [], []
+    for window in df.window.unique():
+        for hr in df.hr_method.unique():
+            sub = df[(df.window == window) & (df.hr_method == hr)]
+ 
+            for a, b in combinations(sub.rppg.unique(), 2):
+                x = sub[sub.rppg == a].error.values
+                y = sub[sub.rppg == b].error.values
+                diff = x - y
+                _, p = ttest_rel(x, y)
+ 
+                pvals.append(p)
+                rows.append({
+                    "window": window, "hr_method": hr,
+                    "comparison": f"{a} - {b}",
+                    "mean_diff": diff.mean(), "p": p,
+                })
+ 
+    res = pd.DataFrame(rows)
+    res["p_corr"] = multipletests(res.p, method="holm")[1]
+    res["sig"] = res.p_corr < 0.05
+    print(res)
+    return res
+ 
+ 
+def plot_rppg_method_effect(res: pd.DataFrame) -> None:
+    def pivot_for_window(win):
+        sub = res[res.window == win]
+        heat = sub.pivot(index="hr_method", columns="comparison", values="mean_diff")
+        sig = sub.pivot(index="hr_method", columns="comparison", values="sig")
+        return heat, sig
+ 
+    windows = res.window.unique()
+    fig, axes = plt.subplots(1, len(windows), figsize=(6 * len(windows), 5), sharey=True)
+    if len(windows) == 1:
+        axes = [axes]
+ 
+    for ax, win in zip(axes, windows):
+        heat, sig = pivot_for_window(win)
+        sns.heatmap(
+            heat, ax=ax, annot=True, fmt=".2f", cmap="coolwarm", center=0,
+            mask=~sig, cbar=ax is axes[-1],
+            cbar_kws={"label": "\u0394 Absolute Error (bpm)"},
+        )
+        ax.set_title(f"rPPG-method comparison ({win})")
+        ax.set_xlabel("rPPG-method contrast")
+        ax.set_ylabel("HR-derivation method")
+ 
+    plt.suptitle(
+        "Effect of rPPG method within each (window x HR-derivation)\n"
+        "Cells shown only if Holm-corrected p < 0.05",
+        y=0.99,
+    )
+    plt.tight_layout()
+
 
 # 9. Best configuration per rPPG method, then head-to-head comparison
 
@@ -563,6 +642,7 @@ def main() -> None:
     table.save("stat_summary.png")
 
     df = build_long_dataframe(subject_mae, methods)
+    run_repeated_measures_anova_pg(df)
     run_repeated_measures_anova(df)
 
     window_res = windowing_effect(df)
@@ -570,6 +650,9 @@ def main() -> None:
 
     hr_res = hr_method_effect(df)
     plot_hr_method_effect(hr_res)
+
+    rppg_res = rppg_method_effect(df)
+    plot_rppg_method_effect(rppg_res)
 
     best_cfgs = best_configurations(df)
     best_df = best_config_subject_data(df, best_cfgs)
