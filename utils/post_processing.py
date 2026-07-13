@@ -52,7 +52,7 @@ def rFFT(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=False):
 
 def periodogram(signal:np.ndarray, fps, min_hz=0.7, max_hz = 2.5, show_graph=False):
     """
-    Does almost the same thing as the rFFT method, but uses SciPy's periodogram method.
+    Uses SciPy's periodogram method to derive heart rate from BVP signal.
     """
     N = _next_power_of_2(len(signal))
     N = 4 * len(signal)
