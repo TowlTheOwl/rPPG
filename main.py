@@ -38,6 +38,7 @@ def record_video(camera_fps: int, recording_duration: int, output_dir: str):
     out = cv2.VideoWriter(output_dir, fourcc, camera_fps, (frame_width, frame_height))
 
     record = False
+    quitting = False
 
     total_frames = recording_duration * camera_fps
     frame_count = 0
@@ -63,6 +64,7 @@ def record_video(camera_fps: int, recording_duration: int, output_dir: str):
         if k != -1:
             if k == ord('q'):
                 print("Exiting")
+                quitting = True
                 break
             elif k == ord('r'):
                 record = True
@@ -70,6 +72,8 @@ def record_video(camera_fps: int, recording_duration: int, output_dir: str):
     cam.release()
     out.release()
     cv2.destroyAllWindows()
+    if quitting:
+        quit()
 
 def analyze_video(video_source: str, show_frame: bool = False):
     """
@@ -221,10 +225,16 @@ def evaluate(signal:np.ndarray, fps:int, results:dict, method_name:str, post_pro
     match method_name:
         case "GREEN":
             BVP = green_only(average_signal, fps, show_graph=show_graph)
+        case "GREEN Windowed":
+            BVP = green_windowed(average_signal, fps, show_graph=show_graph)
         case "Green/Red":
             BVP = ratio_method(average_signal, 0, fps, show_graph=show_graph)
+        case "Green/Red Windowed":
+            BVP = ratio_windowed(average_signal, 0, fps, show_graph=show_graph)
         case "Green/Blue":
             BVP = ratio_method(average_signal, 2, fps, show_graph=show_graph)
+        case "Green/Blue Windowed":
+            BVP = ratio_windowed(average_signal, 2, fps, show_graph=show_graph)
         case "CHROM":
             BVP = CHROM_method(average_signal, fps, show_graph=show_graph)
         case "CHROM Windowed":
@@ -272,8 +282,8 @@ if __name__ == "__main__":
     """
     Start point values:
     0: record video
-    1: analyze a recorded video using video_dir
-    2: calculate
+    1: analyze a recorded video using video_dir (analyze video to extract ROI and its average RGB values, save to data file)
+    2: calculate (use the data file to calculate heart rate using all methods)
     """
     start_point = 0
 
@@ -303,7 +313,18 @@ if __name__ == "__main__":
 
         results = {}
         show_graph = False
-        method_names = ["GREEN", "Green/Red", "Green/Blue", "CHROM", "CHROM Windowed", "POS", "POS Windowed"]
+        method_names = [
+            "GREEN", 
+            "GREEN Windowed", 
+            "Green/Red", 
+            "Green/Red Windowed", 
+            "Green/Blue", 
+            "Green/Blue Windowed", 
+            "CHROM", 
+            "CHROM Windowed", 
+            "POS", 
+            "POS Windowed"
+        ]
         post_processing_methods = ["rFFT", "periodogram", "peak"]
         
         for method_name in method_names:
