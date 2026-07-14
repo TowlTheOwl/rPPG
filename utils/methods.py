@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 
-def bandpass_filter(signal, fps, low=0.7, high=2.5):
+def bandpass_filter(signal, fps, low=0.7, high=3.5):
     """
     Applies a bandpass filter to the given signal with given fps.
     """
