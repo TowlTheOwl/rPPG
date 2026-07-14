@@ -40,8 +40,6 @@ from statsmodels.stats.multitest import multipletests
 from great_tables import GT
 import pingouin as pg
 
-from plots import *  # noqa: F401,F403 (project plotting helpers)
-
 RESULTS_DIR = Path("results")
 DATA_FILE = RESULTS_DIR / "concatenated_results.csv"
 
